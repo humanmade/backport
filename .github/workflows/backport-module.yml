@@ -1,0 +1,93 @@
+name: Reusable Backport Workflow
+
+on:
+  workflow_call:
+    inputs:
+      label_pattern:
+        description: 'Regex pattern to match backport labels'
+        required: false
+        type: string
+        default: '^backport ([^ ]+)$'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  backport:
+    name: Backport PR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Backport Action
+        id: backport
+        uses: korthout/backport-action@v3
+        continue-on-error: true
+        with:
+          label_pattern: ${{ inputs.label_pattern }}
+          experimental: '{"detect_merge_method": true}'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add continuation instructions on conflict
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Check if there were any comments from the backport action about failures
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 10
+            });
+
+            // Look for recent backport failure comments and extract branch info
+            const recentFailureComment = comments.data.find(comment =>
+              comment.created_at > new Date(Date.now() - 60000).toISOString() &&
+              comment.body.includes('Backport failed') &&
+              comment.body.includes('unable to cherry-pick')
+            );
+
+            if (recentFailureComment) {
+              // Extract target branch from the failure comment
+              const targetBranchMatch = recentFailureComment.body.match(/Backport failed for `([^`]+)`/);
+              const worktreeMatch = recentFailureComment.body.match(/\.worktree\/backport-\d+-to-([^\s]+)/);
+
+              const targetBranch = targetBranchMatch ? targetBranchMatch[1] : (worktreeMatch ? worktreeMatch[1] : 'TARGET_BRANCH');
+              const branchName = `backport-${context.issue.number}-to-${targetBranch}`;
+              const worktreePath = `.worktree/backport-${context.issue.number}-to-${targetBranch}`;
+
+              const comment = `
+            ### After resolving conflicts, continue with:
+
+            \`\`\`bash
+            # Add the resolved files
+            git add .
+            # Continue the cherry-pick
+            git cherry-pick --continue
+            # Push the branch to GitHub
+            git push --set-upstream origin ${branchName}
+            # Go back to the original working tree
+            cd ../..
+            # Delete the working tree
+            git worktree remove ${worktreePath}
+            \`\`\`
+
+            Then create a pull request using the GitHub CLI:
+            \`\`\`bash
+            gh pr create --base ${targetBranch} --head ${branchName} --title "[Backport ${targetBranch}] ${context.payload.pull_request.title}" --body "Backport of #${context.issue.number} to \\\`${targetBranch}\\\`."
+            \`\`\`
+            `;
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment
+              });
+            }
