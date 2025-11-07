@@ -1,37 +1,123 @@
-[![build status](https://img.shields.io/circleci/project/github/tibdex/backport.svg)](https://circleci.com/gh/humanmade/backport)
+# Backport Workflow Module
 
-# Goal
+A reusable GitHub Actions workflow for automatically backporting pull requests to other branches.
 
-Backport is a GitHub App, based on [Probot](https://probot.github.io/), to backport a pull request by simply adding a label to it. [Try it!](https://github.com/apps/backporting)
+## Features
 
-# Usage
+- 🏷️ **Label-based triggers** - Simply add a `backport <branch>` label to any PR
+- 🔄 **Multiple backports** - Add multiple labels to backport to several branches at once
+- 💬 **Smart conflict handling** - Automatic comments with detailed resolution instructions
+- ✨ **Ready-to-use commands** - Generated commands include actual branch names
+- 🚀 **Centralized maintenance** - Update once, applies to all repositories
+- 🛠️ **GitHub CLI integration** - Includes `gh` commands for easy PR creation
 
-1.  :electric_plug: Install the publicly hosted [Backport GitHub App](https://github.com/apps/backporting) on your repository.
-2.  :speech_balloon: Let's say you want to backport a pull request on a branch named `production`. Then label it with `backport production`. (See [how to create labels](https://help.github.com/articles/creating-a-label/).)
-3.  :sparkles: That's it! When the pull request gets merged, it will be backported to the `production` branch. If the pull request cannot be backported, a comment explaining why will automatically be posted.
+## Quick Start
 
-_Note:_ multiple backport labels can be added. For example, if a pull request has the labels `backport staging` and `backport production` it will be backported to both branches: `staging` and `production`.
+### Add to Any Repository
 
-## Demo
+Create `.github/workflows/backport.yml` in your repository:
 
-![Backport demo](./assets/demo.gif)
+```yaml
+name: Backport merged pull request
 
-This pull request has two commits and targets the `development` branch. After labeling it with `backport production` and merging it, Backport automatically creates a pull request on the `production` branch by cherry-picking these two commits.
+on:
+  pull_request_target:
+    types: [closed, labeled]
+  workflow_dispatch:
 
-# How it Works
+permissions:
+  contents: write
+  pull-requests: write
 
-Backport relies on [`github-backport`](https://www.npmjs.com/package/github-backport) to perform all the required Git operations directly through the GitHub REST API instead of having to clone repositories on a server and executing Git CLI commands.
+jobs:
+  backport:
+    if: github.event.pull_request.merged == true
+    uses: humanmade/backport/.github/workflows/backport-module.yml@app
+```
 
-`github-backport` is the :old_key: to being able to run Backport as a stateless, easy to maintain, and cheap to operate, GitHub App!
+That's it! The workflow is now active.
 
-## Which Permissions & Webhooks Is Backport Using?
+## Usage
 
-### Permissions
+1. **Create a PR** targeting your main branch
+2. **Add a label** like `backport production` or `backport staging`
+3. **Merge the PR** - backport happens automatically
 
-- **Repository contents** _[read & write]_: because the backporting process requires creating commits and manipulating branches.
-- **Issues** _[read & write]_: to post comments when the backport process fails.
-- **Pull requests** _[read & write]_: to create new pull requests.
+### Multiple Backports
 
-### Webhooks
+Add multiple labels to backport to several branches:
+- `backport production`
+- `backport staging`
 
-- **Pull requests**: to detect when pull requests are merged or labeled.
+Both will be processed automatically.
+
+## Conflict Resolution
+
+When conflicts occur, you'll receive detailed instructions with actual branch names:
+
+```bash
+# Add the resolved files
+git add .
+# Continue the cherry-pick
+git cherry-pick --continue
+# Push the branch to GitHub
+git push --set-upstream origin backport-18-to-prod
+# Go back to the original working tree
+cd ../..
+# Delete the working tree
+git worktree remove .worktree/backport-18-to-prod
+```
+
+Plus a ready-to-use GitHub CLI command:
+```bash
+gh pr create --base prod --head backport-18-to-prod --title "[Backport prod] Fix auth bug" --body "Backport of #18 to \`prod\`."
+```
+
+## Customization
+
+### Custom Label Pattern
+
+If you prefer different label naming:
+
+```yaml
+jobs:
+  backport:
+    if: github.event.pull_request.merged == true
+    uses: humanmade/backport/.github/workflows/backport-module.yml@app
+    with:
+      label_pattern: '^cherry-pick-to ([^ ]+)$'
+```
+
+## Requirements
+
+- Target branches must exist before backporting
+- GitHub Actions must be enabled
+- Repository needs `contents: write` and `pull-requests: write` permissions
+
+## Maintenance
+
+All backport logic is maintained in this repository. Updates are automatic:
+
+1. Update `backport-module.yml` in this repo
+2. Push to the `app` branch
+3. All repositories automatically use the new version
+
+No need to update individual repositories!
+
+## Documentation
+
+See [.github/workflows/README.md](.github/workflows/README.md) for detailed documentation.
+
+## Dependencies
+
+This workflow uses the following external GitHub Actions:
+
+- **[actions/checkout@v4](https://github.com/actions/checkout)** - Checks out the repository code
+- **[korthout/backport-action@v3](https://github.com/korthout/backport-action)** - Core backport functionality for cherry-picking commits
+- **[actions/github-script@v7](https://github.com/actions/github-script)** - Enables custom JavaScript to interact with GitHub API for posting conflict resolution instructions
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file for details.
+
+Copyright (c) 2025 Human Made
